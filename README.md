@@ -47,7 +47,7 @@
 
 1. 填写 `info.txt`，按照上文所述的格式填写账号、密码， 直接运行主程序即可。
 
-2. 前往 (此处)[https://krsmt.notion.site/cli-doc], 了解在各种设备上使用该工具的指令语句。
+2. 前往 [此处](https://krsmt.notion.site/cli-doc), 了解在各种设备上使用该工具的指令语句。
 
 ## ⚠️ 警告
 
