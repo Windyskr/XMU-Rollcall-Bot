@@ -168,7 +168,16 @@ def send_qr(in_session, rollcall_id, ngrok_token, session_timeout=SESSION_TIMEOU
                 continue
 
             if result:
-                data = json.loads(scan_url_analysis(result))
+                try:
+                    data = json.loads(scan_url_analysis(result))
+                except (json.JSONDecodeError, TypeError):
+                    print("二维码内容解析失败，请重新扫码。")
+                    continue
+
+                if "data" not in data:
+                    print("二维码内容缺少签到数据字段，请重新扫码。")
+                    continue
+
                 rollcall_url = f"{base_url}/api/rollcall/{rollcall_id}/answer_qr_rollcall"
                 body = {
                     "data": data["data"],
