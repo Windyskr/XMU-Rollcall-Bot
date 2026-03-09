@@ -7,7 +7,7 @@ name = "xmu-rollcall-cli"
 version = "3.2.1"
 description = "XMU Rollcall Bot CLI - Automated rollcall monitoring and answering for Xiamen University Tronclass"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 license = "MIT"
 authors = [
     {name = "KrsMt", email = "krsmt0113@gmail.com"}
@@ -23,7 +23,6 @@ classifiers = [
     "Topic :: Education",
     "Topic :: Utilities",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
