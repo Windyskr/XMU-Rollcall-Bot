@@ -8,16 +8,17 @@ from queue import Queue, Empty
 
 from flask import Flask, request, jsonify, render_template
 try:
-    from pyngrok import ngrok
     from pyngrok.exception import PyngrokNgrokInstallError
-    _ngrok_available = True
 except ImportError:
-    ngrok = None
-
     class PyngrokNgrokInstallError(Exception):
         """Placeholder so except clauses compile when pyngrok is absent."""
         pass
 
+try:
+    from pyngrok import ngrok
+    _ngrok_available = True
+except (ImportError, PyngrokNgrokInstallError):
+    ngrok = None
     _ngrok_available = False
 from .parse_code import parse_sign_qr_code
 from urllib.parse import urlparse, parse_qs
