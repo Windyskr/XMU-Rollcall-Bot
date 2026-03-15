@@ -1,3 +1,9 @@
+# 本项目为开源项目，不存在任何收费服务，请勿相信任何以本项目名义进行的收费行为。相关线索欢迎提交至我的邮箱。
+
+> 举报信息1:
+> - 举报类型：在校园集市利用该项目进行收费
+> - 相关账号：QQ 1419258773 曾用密码：zj131420./13282690883
+
 <div align="center">
 
   <img src="https://socialify.git.ci/KrsMt-0113/XMU-Rollcall-Bot/image?font=JetBrains+Mono&forks=1&language=1&name=1&owner=1&pattern=Plus&stargazers=1&theme=Light" />
