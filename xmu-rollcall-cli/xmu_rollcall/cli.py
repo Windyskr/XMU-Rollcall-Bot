@@ -181,17 +181,22 @@ def config():
             click.echo(f"{Colors.BOLD}Ngrok Token:{Colors.ENDC} {Colors.OKGREEN}Configured{Colors.ENDC}")
         else:
             click.echo(f"{Colors.BOLD}Ngrok Token:{Colors.ENDC} {Colors.GRAY}Not configured (required for QR code rollcall){Colors.ENDC}")
+
+        # 显示轮询间隔配置
+        monitor_interval = current_config.get("monitor_interval", 1)
+        click.echo(f"{Colors.BOLD}Monitor Interval:{Colors.ENDC} {Colors.OKCYAN}{monitor_interval} second(s){Colors.ENDC}")
         click.echo()
 
         click.echo(f"{Colors.BOLD}Choose an action:{Colors.ENDC}")
         click.echo(f"  {Colors.OKCYAN}n{Colors.ENDC} - Add new account")
         click.echo(f"  {Colors.OKCYAN}d{Colors.ENDC} - Delete account")
         click.echo(f"  {Colors.OKCYAN}t{Colors.ENDC} - Configure ngrok token (for QR code rollcall)")
+        click.echo(f"  {Colors.OKCYAN}i{Colors.ENDC} - Set monitor interval")
         click.echo(f"  {Colors.OKCYAN}q{Colors.ENDC} - Quit")
 
         action = click.prompt(
             f"\n{Colors.BOLD}Action{Colors.ENDC}",
-            type=click.Choice(['n', 'd', 't', 'q'], case_sensitive=False),
+            type=click.Choice(['n', 'd', 't', 'i', 'q'], case_sensitive=False),
             default='q'
         )
 
@@ -209,6 +214,22 @@ def config():
             current_config["ngrok_token"] = token
             save_config(current_config)
             click.echo(f"{Colors.OKGREEN}✓ Ngrok token saved.{Colors.ENDC}\n")
+        elif action.lower() == 'i':
+            # Configure monitor interval
+            click.echo(f"{Colors.BOLD}Set monitor polling interval{Colors.ENDC}")
+            click.echo(f"{Colors.GRAY}Interval in seconds between each rollcall check (minimum: 1){Colors.ENDC}\n")
+            current_interval = current_config.get("monitor_interval", 1)
+            new_interval = click.prompt(
+                f"{Colors.BOLD}Interval (seconds){Colors.ENDC}",
+                type=int,
+                default=current_interval
+            )
+            if new_interval < 1:
+                click.echo(f"{Colors.WARNING}⚠ Interval must be at least 1 second, setting to 1.{Colors.ENDC}")
+                new_interval = 1
+            current_config["monitor_interval"] = new_interval
+            save_config(current_config)
+            click.echo(f"{Colors.OKGREEN}✓ Monitor interval set to {new_interval} second(s).{Colors.ENDC}\n")
         elif action.lower() == 'q':
             # 退出前显示最终账号列表
             accounts = get_all_accounts(current_config)
