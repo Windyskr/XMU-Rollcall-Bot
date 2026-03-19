@@ -279,7 +279,8 @@ def start_monitor(account):
     print_dashboard(ACCOUNT_NAME, start_time, query_count, 0, show_banner=False)
 
     footer_initialized = False
-    _last_query_time = 0
+    last_displayed_elapsed = -1
+    next_query_at = 0
 
     try:
         while True:
@@ -296,16 +297,20 @@ def start_monitor(account):
                     update_footer_text()
 
                 elapsed = int(current_time - start_time)
-                if elapsed >= _last_query_time + interval:
-                    _last_query_time = elapsed
-                    data = session.get(rollcalls_url, headers=headers).json()
-                    query_count += 1
+                if elapsed != last_displayed_elapsed:
+                    last_displayed_elapsed = elapsed
 
                     local_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
                     running_time = format_time(elapsed)
 
                     update_status_line(TIME_LINE, "Current Time:", local_time, Colors.OKCYAN)
                     update_status_line(RUNTIME_LINE, "Running Time:", running_time, Colors.OKGREEN)
+
+                if elapsed >= next_query_at:
+                    next_query_at = elapsed + interval
+                    data = session.get(rollcalls_url, headers=headers).json()
+                    query_count += 1
+
                     update_status_line(QUERY_LINE, "Query Count: ", str(query_count), Colors.WARNING)
 
                     if temp_data != data:
@@ -324,6 +329,7 @@ def start_monitor(account):
                             except KeyboardInterrupt:
                                 raise
                             print_dashboard(ACCOUNT_NAME, start_time, query_count, 0)
+                            last_displayed_elapsed = -1
             except KeyboardInterrupt:
                 raise
             except Exception as e:
