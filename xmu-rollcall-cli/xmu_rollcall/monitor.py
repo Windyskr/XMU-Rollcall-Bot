@@ -132,7 +132,7 @@ def print_footer_text(color_offset=0):
     colored = get_colorful_text(text, color_offset)
     print(center_text(colored))
 
-def print_dashboard(name, start_time, query_count, banner_frame=0, show_banner=True):
+def print_dashboard(name, start_time, query_count, banner_frame=0, show_banner=True, rollcall_state=None):
     """打印主仪表板"""
     clear_screen()
     print_banner()
@@ -162,6 +162,18 @@ def print_dashboard(name, start_time, query_count, banner_frame=0, show_banner=T
     print(f"{Colors.OKGREEN}Status:{Colors.ENDC} Active - Monitoring for new rollcalls...")
     print(f"{Colors.GRAY}Checking every {interval} second(s){Colors.ENDC}")
     print(f"{Colors.GRAY}Press Ctrl+C to exit{Colors.ENDC}\n")
+    print(f"{Colors.BOLD}ACTIVE ROLLCALL{Colors.ENDC}")
+    print_separator()
+    active_rollcall = "None"
+    sign_status = "Monitoring for new rollcalls"
+    status_color = Colors.GRAY
+    if rollcall_state:
+        active_rollcall = rollcall_state.get("active_rollcall", active_rollcall)
+        sign_status = rollcall_state.get("sign_status", sign_status)
+        status_color = rollcall_state.get("status_color", status_color)
+    print(f"{Colors.BOLD}Active Rollcall:{Colors.ENDC} {Colors.OKCYAN}{active_rollcall}{Colors.ENDC}")
+    print(f"{Colors.BOLD}Sign Status:{Colors.ENDC}    {status_color}{sign_status}{Colors.ENDC}")
+    print()
     print_separator()
 
     if show_banner:
@@ -178,7 +190,9 @@ def print_login_status(message, is_success=True):
 TIME_LINE = 10
 RUNTIME_LINE = 11
 QUERY_LINE = 12
-FOOTER_LINE = 20
+ACTIVE_ROLLCALL_LINE = 19
+SIGN_STATUS_LINE = 20
+FOOTER_LINE = 23
 
 def update_status_line(line_num, label, value, color):
     """更新指定行的状态信息，不清屏"""
@@ -209,6 +223,33 @@ def update_footer_text():
     sys.stdout.write("\033[u")
     sys.stdout.write("\033[?25h")
     sys.stdout.flush()
+
+
+def get_rollcall_status_color(status_type):
+    if status_type == "working":
+        return Colors.WARNING
+    if status_type == "success":
+        return Colors.OKGREEN
+    if status_type == "failure":
+        return Colors.FAIL
+    if status_type == "pending":
+        return Colors.OKCYAN
+    return Colors.GRAY
+
+
+def update_rollcall_status_lines(rollcall_state):
+    update_status_line(
+        ACTIVE_ROLLCALL_LINE,
+        "Active Rollcall:",
+        rollcall_state.get("active_rollcall", "None"),
+        Colors.OKCYAN,
+    )
+    update_status_line(
+        SIGN_STATUS_LINE,
+        "Sign Status:",
+        rollcall_state.get("sign_status", "Monitoring for new rollcalls"),
+        rollcall_state.get("status_color", Colors.GRAY),
+    )
 
 def start_monitor(account):
     """启动监控程序"""
@@ -275,8 +316,22 @@ def start_monitor(account):
     temp_data = {'rollcalls': []}
     query_count = 0
     start_time = time.time()
+    rollcall_state = {
+        "active_rollcall": "None",
+        "sign_status": "Monitoring for new rollcalls",
+        "status_color": Colors.GRAY,
+    }
 
-    print_dashboard(ACCOUNT_NAME, start_time, query_count, 0, show_banner=False)
+    def update_rollcall_state(active_rollcall, sign_status, status_type="info"):
+        if active_rollcall is None:
+            rollcall_state["active_rollcall"] = "None"
+        else:
+            rollcall_state["active_rollcall"] = active_rollcall
+        rollcall_state["sign_status"] = sign_status
+        rollcall_state["status_color"] = get_rollcall_status_color(status_type)
+        update_rollcall_status_lines(rollcall_state)
+
+    print_dashboard(ACCOUNT_NAME, start_time, query_count, 0, show_banner=False, rollcall_state=rollcall_state)
 
     footer_initialized = False
     last_displayed_elapsed = -1
@@ -316,20 +371,9 @@ def start_monitor(account):
                     if temp_data != data:
                         temp_data = data
                         if len(temp_data['rollcalls']) > 0:
-                            clear_screen()
-                            width = get_terminal_width()
-                            print(f"\n{Colors.WARNING}{Colors.BOLD}{'!' * width}{Colors.ENDC}")
-                            print(center_text(f"{Colors.WARNING}{Colors.BOLD}NEW ROLLCALL DETECTED{Colors.ENDC}"))
-                            print(f"{Colors.WARNING}{Colors.BOLD}{'!' * width}{Colors.ENDC}\n")
-                            temp_data = process_rollcalls(temp_data, session)
-                            print_separator("=")
-                            print(f"\n{center_text(f'{Colors.GRAY}Press Ctrl+C to exit, continuing monitor...{Colors.ENDC}')}\n")
-                            try:
-                                time.sleep(3)
-                            except KeyboardInterrupt:
-                                raise
-                            print_dashboard(ACCOUNT_NAME, start_time, query_count, 0)
-                            last_displayed_elapsed = -1
+                            print(f"\n{Colors.WARNING}{Colors.BOLD}New rollcall detected.{Colors.ENDC}")
+                            temp_data = process_rollcalls(temp_data, session, status_callback=update_rollcall_state)
+                            update_rollcall_status_lines(rollcall_state)
             except KeyboardInterrupt:
                 raise
             except Exception as e:
