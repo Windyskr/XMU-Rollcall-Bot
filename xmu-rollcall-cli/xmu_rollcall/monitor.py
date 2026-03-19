@@ -7,10 +7,20 @@ import re
 from xmulogin import xmulogin
 from .utils import clear_screen, save_session, load_session, verify_session
 from .rollcall_handler import process_rollcalls
-from .config import get_cookies_path
+from .config import get_cookies_path, load_config
 
 base_url = "https://lnt.xmu.edu.cn"
 interval = 1
+
+def _load_monitor_interval():
+    """从配置文件加载监控间隔"""
+    try:
+        config = load_config()
+        val = config.get("monitor_interval", 1)
+        return max(1, int(val))
+    except Exception:
+        return 1
+
 headers = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -75,7 +85,7 @@ def print_banner():
     line = '=' * width
 
     title1 = "XMU Rollcall Bot CLI"
-    title2 = "Version 3.1.6"
+    title2 = "Version 3.3.0"
 
     print(f"{Colors.OKCYAN}{line}{Colors.ENDC}")
     print(center_text(f"{Colors.BOLD}{title1}{Colors.ENDC}"))
@@ -202,6 +212,9 @@ def update_footer_text():
 
 def start_monitor(account):
     """启动监控程序"""
+    global interval
+    interval = _load_monitor_interval()
+
     USERNAME = account['username']
     PASSWORD = account['password']
     ACCOUNT_ID = account.get('id', 1)
@@ -283,7 +296,7 @@ def start_monitor(account):
                     update_footer_text()
 
                 elapsed = int(current_time - start_time)
-                if elapsed > _last_query_time:
+                if elapsed >= _last_query_time + interval:
                     _last_query_time = elapsed
                     data = session.get(rollcalls_url, headers=headers).json()
                     query_count += 1

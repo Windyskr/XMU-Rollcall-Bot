@@ -1,5 +1,6 @@
 import click
 import sys
+import requests
 from xmulogin import xmulogin
 from .config import (
     load_config, save_config, is_config_complete, get_cookies_path,
@@ -7,6 +8,7 @@ from .config import (
     get_account_by_id, CONFIG_FILE, delete_account, perform_account_deletion
 )
 from .monitor import start_monitor, base_url, headers
+from . import __version__
 
 # ANSI Color codes
 class Colors:
@@ -20,11 +22,36 @@ class Colors:
     BOLD = '\033[1m'
     GRAY = '\033[90m'
 
+
+def check_pypi_version():
+    """Check if the current version is the latest on PyPI."""
+    try:
+        resp = requests.get(
+            "https://pypi.org/pypi/xmu-rollcall-cli/json", timeout=5
+        )
+        if resp.status_code == 200:
+            latest = resp.json()["info"]["version"]
+            if _parse_version(latest) > _parse_version(__version__):
+                click.echo(
+                    f"{Colors.WARNING}新版本可用: v{latest}（当前: v{__version__}），"
+                    f"请运行 pip install -U xmu-rollcall-cli 进行更新{Colors.ENDC}"
+                )
+    except Exception:
+        pass
+
+
+def _parse_version(v):
+    """Parse a version string into a comparable tuple of ints."""
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except (ValueError, AttributeError):
+        return (0,)
+
 @click.group(invoke_without_command=True)
 @click.pass_context
 def cli(ctx):
     if ctx.invoked_subcommand is None:
-        click.echo(f"{Colors.OKCYAN}{Colors.BOLD}XMU Rollcall Bot CLI v3.2.1{Colors.ENDC}")
+        click.echo(f"{Colors.OKCYAN}{Colors.BOLD}XMU Rollcall Bot CLI v3.3.1{Colors.ENDC}")
         click.echo(f"\nUsage:")
         click.echo(f"  xmu config    Configure credentials and add accounts")
         click.echo(f"  xmu switch    Switch between accounts")
@@ -154,17 +181,22 @@ def config():
             click.echo(f"{Colors.BOLD}Ngrok Token:{Colors.ENDC} {Colors.OKGREEN}Configured{Colors.ENDC}")
         else:
             click.echo(f"{Colors.BOLD}Ngrok Token:{Colors.ENDC} {Colors.GRAY}Not configured (required for QR code rollcall){Colors.ENDC}")
+
+        # 显示轮询间隔配置
+        monitor_interval = current_config.get("monitor_interval", 1)
+        click.echo(f"{Colors.BOLD}Monitor Interval:{Colors.ENDC} {Colors.OKCYAN}{monitor_interval} second(s){Colors.ENDC}")
         click.echo()
 
         click.echo(f"{Colors.BOLD}Choose an action:{Colors.ENDC}")
         click.echo(f"  {Colors.OKCYAN}n{Colors.ENDC} - Add new account")
         click.echo(f"  {Colors.OKCYAN}d{Colors.ENDC} - Delete account")
         click.echo(f"  {Colors.OKCYAN}t{Colors.ENDC} - Configure ngrok token (for QR code rollcall)")
+        click.echo(f"  {Colors.OKCYAN}i{Colors.ENDC} - Set monitor interval")
         click.echo(f"  {Colors.OKCYAN}q{Colors.ENDC} - Quit")
 
         action = click.prompt(
             f"\n{Colors.BOLD}Action{Colors.ENDC}",
-            type=click.Choice(['n', 'd', 't', 'q'], case_sensitive=False),
+            type=click.Choice(['n', 'd', 't', 'i', 'q'], case_sensitive=False),
             default='q'
         )
 
@@ -182,6 +214,22 @@ def config():
             current_config["ngrok_token"] = token
             save_config(current_config)
             click.echo(f"{Colors.OKGREEN}✓ Ngrok token saved.{Colors.ENDC}\n")
+        elif action.lower() == 'i':
+            # Configure monitor interval
+            click.echo(f"{Colors.BOLD}Set monitor polling interval{Colors.ENDC}")
+            click.echo(f"{Colors.GRAY}Interval in seconds between each rollcall check (minimum: 1){Colors.ENDC}\n")
+            current_interval = current_config.get("monitor_interval", 1)
+            new_interval = click.prompt(
+                f"{Colors.BOLD}Interval (seconds){Colors.ENDC}",
+                type=int,
+                default=current_interval
+            )
+            if new_interval < 1:
+                click.echo(f"{Colors.WARNING}⚠ Interval must be at least 1 second, setting to 1.{Colors.ENDC}")
+                new_interval = 1
+            current_config["monitor_interval"] = new_interval
+            save_config(current_config)
+            click.echo(f"{Colors.OKGREEN}✓ Monitor interval set to {new_interval} second(s).{Colors.ENDC}\n")
         elif action.lower() == 'q':
             # 退出前显示最终账号列表
             accounts = get_all_accounts(current_config)
@@ -210,6 +258,9 @@ def start():
     # 获取当前账号
     current_account = get_current_account(config_data)
     click.echo(f"{Colors.OKCYAN}Using account: {current_account.get('name') or current_account.get('username')} (ID: {current_account.get('id')}){Colors.ENDC}")
+
+    # 检查 PyPI 上是否有新版本
+    check_pypi_version()
 
     # 启动监控
     try:
