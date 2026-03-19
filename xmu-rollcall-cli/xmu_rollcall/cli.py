@@ -182,6 +182,12 @@ def config():
         else:
             click.echo(f"{Colors.BOLD}Ngrok Token:{Colors.ENDC} {Colors.GRAY}Not configured (required for QR code rollcall){Colors.ENDC}")
 
+        bark_url = current_config.get("bark_url", "")
+        if bark_url:
+            click.echo(f"{Colors.BOLD}Bark URL:{Colors.ENDC} {Colors.OKGREEN}Configured{Colors.ENDC}")
+        else:
+            click.echo(f"{Colors.BOLD}Bark URL:{Colors.ENDC} {Colors.GRAY}Not configured (optional push notifications){Colors.ENDC}")
+
         # 显示轮询间隔配置
         monitor_interval = current_config.get("monitor_interval", 1)
         click.echo(f"{Colors.BOLD}Monitor Interval:{Colors.ENDC} {Colors.OKCYAN}{monitor_interval} second(s){Colors.ENDC}")
@@ -191,12 +197,13 @@ def config():
         click.echo(f"  {Colors.OKCYAN}n{Colors.ENDC} - Add new account")
         click.echo(f"  {Colors.OKCYAN}d{Colors.ENDC} - Delete account")
         click.echo(f"  {Colors.OKCYAN}t{Colors.ENDC} - Configure ngrok token (for QR code rollcall)")
+        click.echo(f"  {Colors.OKCYAN}b{Colors.ENDC} - Configure Bark URL (for push notifications)")
         click.echo(f"  {Colors.OKCYAN}i{Colors.ENDC} - Set monitor interval")
         click.echo(f"  {Colors.OKCYAN}q{Colors.ENDC} - Quit")
 
         action = click.prompt(
             f"\n{Colors.BOLD}Action{Colors.ENDC}",
-            type=click.Choice(['n', 'd', 't', 'i', 'q'], case_sensitive=False),
+            type=click.Choice(['n', 'd', 't', 'b', 'i', 'q'], case_sensitive=False),
             default='q'
         )
 
@@ -214,6 +221,21 @@ def config():
             current_config["ngrok_token"] = token
             save_config(current_config)
             click.echo(f"{Colors.OKGREEN}✓ Ngrok token saved.{Colors.ENDC}\n")
+        elif action.lower() == 'b':
+            click.echo(f"{Colors.BOLD}Configure Bark URL for push notifications{Colors.ENDC}")
+            click.echo(f"{Colors.GRAY}Example: https://api.day.app/your_device_key{Colors.ENDC}")
+            click.echo(f"{Colors.GRAY}Leave empty to disable Bark notifications.{Colors.ENDC}\n")
+            bark_url = click.prompt(
+                f"{Colors.BOLD}Bark URL{Colors.ENDC}",
+                default=current_config.get("bark_url", ""),
+                show_default=False
+            ).strip()
+            current_config["bark_url"] = bark_url
+            save_config(current_config)
+            if bark_url:
+                click.echo(f"{Colors.OKGREEN}Bark URL saved.{Colors.ENDC}\n")
+            else:
+                click.echo(f"{Colors.OKGREEN}Bark notifications disabled.{Colors.ENDC}\n")
         elif action.lower() == 'i':
             # Configure monitor interval
             click.echo(f"{Colors.BOLD}Set monitor polling interval{Colors.ENDC}")

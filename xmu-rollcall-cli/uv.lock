@@ -1829,7 +1829,7 @@ wheels = [
 
 [[package]]
 name = "xmu-rollcall-cli"
-version = "3.2.1"
+version = "3.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp", version = "3.10.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
@@ -1839,11 +1839,15 @@ dependencies = [
     { name = "flask", version = "3.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "flask", version = "3.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
     { name = "pycryptodome" },
-    { name = "pyngrok", version = "7.2.12", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pyngrok", version = "7.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
     { name = "requests", version = "2.32.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "requests", version = "2.32.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
     { name = "xmulogin" },
+]
+
+[package.optional-dependencies]
+qr = [
+    { name = "pyngrok", version = "7.2.12", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "pyngrok", version = "7.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
 ]
 
 [package.metadata]
@@ -1852,10 +1856,11 @@ requires-dist = [
     { name = "click", specifier = ">=8.1.0" },
     { name = "flask", specifier = ">=3.0.0" },
     { name = "pycryptodome" },
-    { name = "pyngrok", specifier = ">=7.0.0" },
+    { name = "pyngrok", marker = "extra == 'qr'", specifier = ">=7.0.0" },
     { name = "requests" },
     { name = "xmulogin" },
 ]
+provides-extras = ["qr"]
 
 [[package]]
 name = "xmulogin"

@@ -1,5 +1,6 @@
 import os
 import json
+from copy import deepcopy
 from pathlib import Path
 
 def get_config_dir():
@@ -40,6 +41,7 @@ DEFAULT_CONFIG = {
     "accounts": [],
     "current_account_id": None,
     "ngrok_token": "",
+    "bark_url": "",
     "monitor_interval": 1
 }
 
@@ -70,7 +72,8 @@ def load_config():
                     old_username = config.get("username", "")
                     old_password = config.get("password", "")
                     if old_username and old_password:
-                        new_config = {
+                        new_config = deepcopy(DEFAULT_CONFIG)
+                        new_config.update({
                             "accounts": [{
                                 "id": 1,
                                 "name": "",
@@ -78,13 +81,15 @@ def load_config():
                                 "password": old_password
                             }],
                             "current_account_id": 1
-                        }
+                        })
                         return new_config
-                    return DEFAULT_CONFIG.copy()
-                return config
+                    return deepcopy(DEFAULT_CONFIG)
+                merged_config = deepcopy(DEFAULT_CONFIG)
+                merged_config.update(config)
+                return merged_config
         except Exception:
-            return DEFAULT_CONFIG.copy()
-    return DEFAULT_CONFIG.copy()
+            return deepcopy(DEFAULT_CONFIG)
+    return deepcopy(DEFAULT_CONFIG)
 
 def save_config(config):
     """保存配置文件"""
