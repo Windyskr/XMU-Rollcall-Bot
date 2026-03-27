@@ -4,10 +4,11 @@ import sys
 import requests
 import shutil
 import re
+from datetime import datetime, timedelta
 from xmulogin import xmulogin
 from .utils import clear_screen, save_session, load_session, verify_session
 from .rollcall_handler import process_rollcalls
-from .config import get_cookies_path, load_config
+from .config import get_cookies_path, load_config, normalize_monitor_schedule
 
 base_url = "https://lnt.xmu.edu.cn"
 interval = 1
@@ -20,6 +21,15 @@ def _load_monitor_interval():
         return max(1, int(val))
     except Exception:
         return 1
+
+
+def _load_monitor_schedule():
+    """从配置文件加载监控时段。"""
+    try:
+        config = load_config()
+        return normalize_monitor_schedule(config.get("monitor_schedule"))
+    except Exception:
+        return normalize_monitor_schedule(None)
 
 headers = {
     "User-Agent": (
@@ -132,7 +142,15 @@ def print_footer_text(color_offset=0):
     colored = get_colorful_text(text, color_offset)
     print(center_text(colored))
 
-def print_dashboard(name, start_time, query_count, banner_frame=0, show_banner=True, rollcall_state=None):
+def print_dashboard(
+    name,
+    start_time,
+    query_count,
+    banner_frame=0,
+    show_banner=True,
+    rollcall_state=None,
+    monitor_state=None,
+):
     """打印主仪表板"""
     clear_screen()
     print_banner()
@@ -159,9 +177,16 @@ def print_dashboard(name, start_time, query_count, banner_frame=0, show_banner=T
 
     print(f"\n{Colors.BOLD}ROLLCALL MONITOR{Colors.ENDC}")
     print_separator()
-    print(f"{Colors.OKGREEN}Status:{Colors.ENDC} Active - Monitoring for new rollcalls...")
-    print(f"{Colors.GRAY}Checking every {interval} second(s){Colors.ENDC}")
-    print(f"{Colors.GRAY}Press Ctrl+C to exit{Colors.ENDC}\n")
+    monitor_status = "Active - Monitoring for new rollcalls..."
+    monitor_color = Colors.OKGREEN
+    schedule_text = "Disabled (always on)"
+    if monitor_state:
+        monitor_status = monitor_state.get("status_text", monitor_status)
+        monitor_color = monitor_state.get("status_color", monitor_color)
+        schedule_text = monitor_state.get("schedule_text", schedule_text)
+    print(f"{Colors.BOLD}Status:{Colors.ENDC}          {monitor_color}{monitor_status}{Colors.ENDC}")
+    print(f"{Colors.BOLD}Schedule:{Colors.ENDC}        {Colors.OKCYAN}{schedule_text}{Colors.ENDC}")
+    print(f"{Colors.GRAY}Checking every {interval} second(s) | Press Ctrl+C to exit{Colors.ENDC}\n")
     print(f"{Colors.BOLD}ACTIVE ROLLCALL{Colors.ENDC}")
     print_separator()
     active_rollcall = "None"
@@ -187,9 +212,123 @@ def print_login_status(message, is_success=True):
     else:
         print(f"{Colors.FAIL}[FAILED]{Colors.ENDC} {message}")
 
+
+WEEKDAY_LABELS = {
+    1: "Mon",
+    2: "Tue",
+    3: "Wed",
+    4: "Thu",
+    5: "Fri",
+    6: "Sat",
+    7: "Sun",
+}
+
+
+def _parse_schedule_time(time_text):
+    """将 HH:MM 解析为小时和分钟。"""
+    hour_text, minute_text = time_text.split(":")
+    return int(hour_text), int(minute_text)
+
+
+def _time_minutes(time_text):
+    hour, minute = _parse_schedule_time(time_text)
+    return hour * 60 + minute
+
+
+def describe_schedule(schedule):
+    """生成监控时段的人类可读描述。"""
+    schedule = normalize_monitor_schedule(schedule)
+    if not schedule.get("enabled"):
+        return "Disabled (always on)"
+
+    days = schedule.get("days", [])
+    if days == [1, 2, 3, 4, 5, 6, 7]:
+        days_text = "Every day"
+    else:
+        days_text = ", ".join(WEEKDAY_LABELS.get(day, str(day)) for day in days)
+    return f"{days_text} {schedule.get('start_time')} - {schedule.get('end_time')}"
+
+
+def is_in_schedule_window(schedule, now=None):
+    """判断当前时间是否处于允许监控的时段。"""
+    schedule = normalize_monitor_schedule(schedule)
+    if not schedule.get("enabled"):
+        return True
+
+    now = now or datetime.now()
+    current_minutes = now.hour * 60 + now.minute
+    start_minutes = _time_minutes(schedule["start_time"])
+    end_minutes = _time_minutes(schedule["end_time"])
+    today = now.isoweekday()
+    yesterday = 7 if today == 1 else today - 1
+    days = set(schedule.get("days", []))
+
+    if start_minutes == end_minutes:
+        return today in days
+
+    if start_minutes < end_minutes:
+        return today in days and start_minutes <= current_minutes < end_minutes
+
+    return (
+        (today in days and current_minutes >= start_minutes)
+        or (yesterday in days and current_minutes < end_minutes)
+    )
+
+
+def get_next_schedule_start(schedule, now=None):
+    """获取下一个监控开始时间。"""
+    schedule = normalize_monitor_schedule(schedule)
+    if not schedule.get("enabled"):
+        return None
+
+    now = now or datetime.now()
+    start_hour, start_minute = _parse_schedule_time(schedule["start_time"])
+    days = set(schedule.get("days", []))
+
+    for offset in range(0, 15):
+        candidate_date = now.date() + timedelta(days=offset)
+        if candidate_date.isoweekday() not in days:
+            continue
+        candidate = datetime.combine(
+            candidate_date,
+            datetime.min.time(),
+        ).replace(hour=start_hour, minute=start_minute)
+        if candidate > now:
+            return candidate
+    return None
+
+
+def get_current_window_end(schedule, now=None):
+    """获取当前这段监控窗口的结束时间。"""
+    schedule = normalize_monitor_schedule(schedule)
+    if not schedule.get("enabled"):
+        return None
+
+    now = now or datetime.now()
+    if not is_in_schedule_window(schedule, now):
+        return None
+
+    start_minutes = _time_minutes(schedule["start_time"])
+    end_minutes = _time_minutes(schedule["end_time"])
+    end_hour, end_minute = _parse_schedule_time(schedule["end_time"])
+    today_start = datetime.combine(now.date(), datetime.min.time())
+
+    if start_minutes == end_minutes:
+        return today_start + timedelta(days=1, hours=end_hour, minutes=end_minute)
+
+    if start_minutes < end_minutes:
+        return today_start.replace(hour=end_hour, minute=end_minute)
+
+    current_minutes = now.hour * 60 + now.minute
+    if current_minutes >= start_minutes:
+        return today_start + timedelta(days=1, hours=end_hour, minutes=end_minute)
+    return today_start.replace(hour=end_hour, minute=end_minute)
+
 TIME_LINE = 10
 RUNTIME_LINE = 11
 QUERY_LINE = 12
+MONITOR_STATUS_LINE = 16
+SCHEDULE_LINE = 17
 ACTIVE_ROLLCALL_LINE = 19
 SIGN_STATUS_LINE = 20
 FOOTER_LINE = 23
@@ -251,10 +390,27 @@ def update_rollcall_status_lines(rollcall_state):
         rollcall_state.get("status_color", Colors.GRAY),
     )
 
+
+def update_monitor_status_lines(monitor_state):
+    update_status_line(
+        MONITOR_STATUS_LINE,
+        "Status:",
+        monitor_state.get("status_text", "Active - Monitoring for new rollcalls..."),
+        monitor_state.get("status_color", Colors.OKGREEN),
+    )
+    update_status_line(
+        SCHEDULE_LINE,
+        "Schedule:",
+        monitor_state.get("schedule_text", "Disabled (always on)"),
+        Colors.OKCYAN,
+    )
+
 def start_monitor(account):
     """启动监控程序"""
     global interval
     interval = _load_monitor_interval()
+    monitor_schedule = _load_monitor_schedule()
+    schedule_description = describe_schedule(monitor_schedule)
 
     USERNAME = account['username']
     PASSWORD = account['password']
@@ -309,6 +465,7 @@ def start_monitor(account):
     print_login_status(f"Welcome, {ACCOUNT_NAME}", True)
 
     print(f"\n{Colors.OKGREEN}{Colors.BOLD}Initialization complete{Colors.ENDC}")
+    print(f"{Colors.GRAY}Monitor schedule: {schedule_description}{Colors.ENDC}")
     print(f"\n{Colors.GRAY}Starting monitor in 3 seconds...{Colors.ENDC}")
     time.sleep(3)
 
@@ -321,6 +478,11 @@ def start_monitor(account):
         "sign_status": "Monitoring for new rollcalls",
         "status_color": Colors.GRAY,
     }
+    monitor_state = {
+        "status_text": "Active - Monitoring for new rollcalls...",
+        "status_color": Colors.OKGREEN,
+        "schedule_text": schedule_description,
+    }
 
     def update_rollcall_state(active_rollcall, sign_status, status_type="info"):
         if active_rollcall is None:
@@ -331,11 +493,32 @@ def start_monitor(account):
         rollcall_state["status_color"] = get_rollcall_status_color(status_type)
         update_rollcall_status_lines(rollcall_state)
 
-    print_dashboard(ACCOUNT_NAME, start_time, query_count, 0, show_banner=False, rollcall_state=rollcall_state)
+    def update_monitor_state(status_text, status_color, schedule_text):
+        if (
+            monitor_state.get("status_text") == status_text
+            and monitor_state.get("status_color") == status_color
+            and monitor_state.get("schedule_text") == schedule_text
+        ):
+            return
+        monitor_state["status_text"] = status_text
+        monitor_state["status_color"] = status_color
+        monitor_state["schedule_text"] = schedule_text
+        update_monitor_status_lines(monitor_state)
+
+    print_dashboard(
+        ACCOUNT_NAME,
+        start_time,
+        query_count,
+        0,
+        show_banner=False,
+        rollcall_state=rollcall_state,
+        monitor_state=monitor_state,
+    )
 
     footer_initialized = False
     last_displayed_elapsed = -1
     next_query_at = 0
+    last_monitoring_allowed = None
 
     try:
         while True:
@@ -346,6 +529,7 @@ def start_monitor(account):
 
             try:
                 current_time = time.time()
+                now_dt = datetime.now()
 
                 if not footer_initialized:
                     footer_initialized = True
@@ -360,6 +544,59 @@ def start_monitor(account):
 
                     update_status_line(TIME_LINE, "Current Time:", local_time, Colors.OKCYAN)
                     update_status_line(RUNTIME_LINE, "Running Time:", running_time, Colors.OKGREEN)
+
+                monitoring_allowed = is_in_schedule_window(monitor_schedule, now_dt)
+
+                if monitor_schedule.get("enabled"):
+                    if monitoring_allowed:
+                        window_end = get_current_window_end(monitor_schedule, now_dt)
+                        schedule_text = schedule_description
+                        if window_end is not None:
+                            schedule_text = (
+                                f"{schedule_description} | Ends at "
+                                f"{window_end.strftime('%Y-%m-%d %H:%M')}"
+                            )
+                        update_monitor_state(
+                            "Active - Monitoring for new rollcalls...",
+                            Colors.OKGREEN,
+                            schedule_text,
+                        )
+                        if last_monitoring_allowed is not True:
+                            update_rollcall_state(
+                                None,
+                                "Monitoring for new rollcalls",
+                                "pending",
+                            )
+                            next_query_at = elapsed
+                    else:
+                        next_start = get_next_schedule_start(monitor_schedule, now_dt)
+                        schedule_text = schedule_description
+                        if next_start is not None:
+                            schedule_text = (
+                                f"{schedule_description} | Next start "
+                                f"{next_start.strftime('%Y-%m-%d %H:%M')}"
+                            )
+                        update_monitor_state(
+                            "Paused - Waiting for scheduled start",
+                            Colors.WARNING,
+                            schedule_text,
+                        )
+                        if last_monitoring_allowed is not False:
+                            update_rollcall_state(
+                                None,
+                                "Waiting for next monitor window",
+                                "pending",
+                            )
+                        last_monitoring_allowed = False
+                        continue
+                else:
+                    update_monitor_state(
+                        "Active - Monitoring for new rollcalls...",
+                        Colors.OKGREEN,
+                        schedule_description,
+                    )
+
+                last_monitoring_allowed = True
 
                 if elapsed >= next_query_at:
                     next_query_at = elapsed + interval
@@ -388,4 +625,3 @@ def start_monitor(account):
         print(f"{center_text(f'{Colors.GRAY}Total running time: {format_time(int(time.time() - start_time))}{Colors.ENDC}')}")
         print(f"\n{center_text(f'{Colors.OKGREEN}Goodbye{Colors.ENDC}')}\n")
         sys.exit(0)
-

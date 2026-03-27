@@ -3,6 +3,13 @@ import json
 from copy import deepcopy
 from pathlib import Path
 
+DEFAULT_MONITOR_SCHEDULE = {
+    "enabled": False,
+    "days": [1, 2, 3, 4, 5, 6, 7],
+    "start_time": "08:00",
+    "end_time": "22:00",
+}
+
 def get_config_dir():
     """
     获取配置目录路径，支持沙盒环境（如 a-Shell）
@@ -42,7 +49,8 @@ DEFAULT_CONFIG = {
     "current_account_id": None,
     "ngrok_token": "",
     "bark_url": "",
-    "monitor_interval": 1
+    "monitor_interval": 1,
+    "monitor_schedule": deepcopy(DEFAULT_MONITOR_SCHEDULE),
 }
 
 DEFAULT_ACCOUNT = {
@@ -86,6 +94,9 @@ def load_config():
                     return deepcopy(DEFAULT_CONFIG)
                 merged_config = deepcopy(DEFAULT_CONFIG)
                 merged_config.update(config)
+                merged_config["monitor_schedule"] = normalize_monitor_schedule(
+                    config.get("monitor_schedule")
+                )
                 return merged_config
         except Exception:
             return deepcopy(DEFAULT_CONFIG)
@@ -94,8 +105,12 @@ def load_config():
 def save_config(config):
     """保存配置文件"""
     ensure_config_dir()
+    config_to_save = deepcopy(config)
+    config_to_save["monitor_schedule"] = normalize_monitor_schedule(
+        config_to_save.get("monitor_schedule")
+    )
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+        json.dump(config_to_save, f, indent=2, ensure_ascii=False)
 
 def get_next_account_id(config):
     """获取下一个可用的账号ID"""
@@ -234,3 +249,44 @@ def perform_account_deletion(cookies_to_delete, cookies_to_rename):
                 os.remove(new_path)
             os.rename(old_path, new_path)
 
+
+def normalize_monitor_schedule(schedule):
+    """规范化监控时段配置，兼容旧配置和异常输入。"""
+    normalized = deepcopy(DEFAULT_MONITOR_SCHEDULE)
+    if not isinstance(schedule, dict):
+        return normalized
+
+    normalized["enabled"] = bool(schedule.get("enabled", normalized["enabled"]))
+
+    raw_days = schedule.get("days", normalized["days"])
+    if isinstance(raw_days, list):
+        days = []
+        for day in raw_days:
+            try:
+                day_int = int(day)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= day_int <= 7 and day_int not in days:
+                days.append(day_int)
+        if days:
+            normalized["days"] = sorted(days)
+
+    for key in ("start_time", "end_time"):
+        value = schedule.get(key, normalized[key])
+        if _is_valid_time_text(value):
+            normalized[key] = value
+
+    return normalized
+
+
+def _is_valid_time_text(value):
+    """校验时间格式是否为 HH:MM。"""
+    if not isinstance(value, str) or len(value) != 5 or value[2] != ":":
+        return False
+    hour_text, minute_text = value.split(":")
+    if not (hour_text.isdigit() and minute_text.isdigit()):
+        return False
+
+    hour = int(hour_text)
+    minute = int(minute_text)
+    return 0 <= hour <= 23 and 0 <= minute <= 59
