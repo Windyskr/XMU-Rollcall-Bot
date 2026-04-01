@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from xmulogin import xmulogin
 from .utils import clear_screen, save_session, load_session, verify_session
 from .rollcall_handler import process_rollcalls
+from .notification import send_bark_message
 from .config import get_cookies_path, load_config, normalize_monitor_schedule
 
 base_url = "https://lnt.xmu.edu.cn"
@@ -483,6 +484,8 @@ def start_monitor(account):
         "status_color": Colors.OKGREEN,
         "schedule_text": schedule_description,
     }
+    next_relogin_allowed_at = 0.0
+    relogin_alert_active = False
     initial_now_dt = datetime.now()
     initial_monitoring_allowed = is_in_schedule_window(monitor_schedule, initial_now_dt)
 
@@ -536,6 +539,119 @@ def start_monitor(account):
         monitor_state["status_color"] = status_color
         monitor_state["schedule_text"] = schedule_text
         update_monitor_status_lines(monitor_state)
+
+    def payload_requires_relogin(payload):
+        if not isinstance(payload, dict):
+            return False
+        if "rollcalls" in payload:
+            return False
+
+        code_text = str(payload.get("code", "")).strip().lower()
+        if code_text in {"401", "403", "unauthorized", "forbidden", "not_login"}:
+            return True
+
+        message_parts = [
+            payload.get("message"),
+            payload.get("msg"),
+            payload.get("error"),
+            payload.get("detail"),
+            payload.get("description"),
+        ]
+        message_text = " ".join(str(part) for part in message_parts if part is not None).lower()
+        keywords = ("login", "auth", "session", "expired", "未登录", "登录", "认证", "过期")
+        return any(keyword in message_text for keyword in keywords)
+
+    def response_looks_like_login_page(response):
+        if response.status_code in (401, 403):
+            return True
+
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "application/json" in content_type:
+            return False
+
+        snippet = (response.text or "")[:600].lower()
+        return any(
+            token in snippet
+            for token in (
+                "authserver",
+                "login",
+                "/cas/",
+                "统一身份认证",
+                "sso",
+            )
+        )
+
+    def relogin_session(reason):
+        nonlocal session, next_relogin_allowed_at, relogin_alert_active
+
+        now_ts = time.time()
+        if now_ts < next_relogin_allowed_at:
+            return False
+
+        schedule_text = monitor_state.get("schedule_text", schedule_description)
+        update_monitor_state("Re-authenticating session...", Colors.WARNING, schedule_text)
+        update_rollcall_state(None, f"Session expired, re-login... ({reason})", "working")
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            new_session = xmulogin(type=3, username=USERNAME, password=PASSWORD)
+            if new_session and verify_session(new_session):
+                session = new_session
+                save_session(session, cookies_path)
+                next_relogin_allowed_at = 0.0
+                relogin_alert_active = False
+                update_rollcall_state(None, "Re-login successful, monitoring resumed", "success")
+                update_monitor_state("Active - Monitoring for new rollcalls...", Colors.OKGREEN, schedule_text)
+                return True
+            if attempt < max_attempts:
+                update_rollcall_state(
+                    None,
+                    f"Re-login attempt {attempt}/{max_attempts} failed, retrying...",
+                    "working",
+                )
+                time.sleep(2)
+
+        next_relogin_allowed_at = time.time() + 15
+        update_rollcall_state(None, "Re-login failed, will retry later", "failure")
+        update_monitor_state("Paused - Re-login failed", Colors.FAIL, schedule_text)
+        if not relogin_alert_active:
+            alert_title = "XMU Rollcall Bot 自动重登失败"
+            alert_body = (
+                f"账号: {ACCOUNT_NAME or USERNAME}\n"
+                f"原因: {reason}\n"
+                "监控已暂停，程序将继续自动重试重登。"
+            )
+            send_bark_message(alert_title, alert_body)
+            relogin_alert_active = True
+        return False
+
+    def fetch_rollcalls_with_relogin():
+        for _ in range(2):
+            response = session.get(rollcalls_url, headers=headers, timeout=15)
+            relogin_reason = None
+            data = None
+
+            if response_looks_like_login_page(response):
+                relogin_reason = f"received status {response.status_code}"
+            else:
+                try:
+                    data = response.json()
+                except ValueError:
+                    raise RuntimeError(
+                        f"Unexpected non-JSON response from rollcalls API (status={response.status_code})"
+                    )
+                if payload_requires_relogin(data):
+                    relogin_reason = "API reported unauthenticated session"
+                elif not isinstance(data, dict) or "rollcalls" not in data:
+                    raise RuntimeError("Unexpected rollcalls response format")
+
+            if relogin_reason:
+                if relogin_session(relogin_reason):
+                    continue
+                return None
+
+            return data
+        return None
 
     print_dashboard(
         ACCOUNT_NAME,
@@ -632,17 +748,23 @@ def start_monitor(account):
 
                 if elapsed >= next_query_at:
                     next_query_at = elapsed + interval
-                    data = session.get(rollcalls_url, headers=headers).json()
+                    data = fetch_rollcalls_with_relogin()
+                    if data is None:
+                        continue
                     query_count += 1
 
                     update_status_line(QUERY_LINE, "Query Count: ", str(query_count), Colors.WARNING)
 
                     if temp_data != data:
-                        temp_data = data
-                        if len(temp_data['rollcalls']) > 0:
+                        if len(data.get('rollcalls', [])) > 0:
+                            if not verify_session(session):
+                                if not relogin_session("session check failed before answering rollcall"):
+                                    continue
                             print(f"\n{Colors.WARNING}{Colors.BOLD}New rollcall detected.{Colors.ENDC}")
-                            temp_data = process_rollcalls(temp_data, session, status_callback=update_rollcall_state)
+                            temp_data = process_rollcalls(data, session, status_callback=update_rollcall_state)
                             update_rollcall_status_lines(rollcall_state)
+                        else:
+                            temp_data = data
             except KeyboardInterrupt:
                 raise
             except Exception as e:
