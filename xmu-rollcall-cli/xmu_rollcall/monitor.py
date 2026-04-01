@@ -147,6 +147,7 @@ def print_dashboard(
     name,
     start_time,
     query_count,
+    next_check_text="Calculating...",
     banner_frame=0,
     show_banner=True,
     rollcall_state=None,
@@ -175,6 +176,7 @@ def print_dashboard(
     print(f"{Colors.BOLD}Current Time:{Colors.ENDC}    {Colors.OKCYAN}{local_time}{Colors.ENDC}")
     print(f"{Colors.BOLD}Running Time:{Colors.ENDC}    {Colors.OKGREEN}{format_time(running_time)}{Colors.ENDC}")
     print(f"{Colors.BOLD}Query Count:{Colors.ENDC}     {Colors.WARNING}{query_count}{Colors.ENDC}")
+    print(f"{Colors.BOLD}Next Check:{Colors.ENDC}     {Colors.OKCYAN}{next_check_text}{Colors.ENDC}")
 
     print(f"\n{Colors.BOLD}ROLLCALL MONITOR{Colors.ENDC}")
     print_separator()
@@ -328,11 +330,12 @@ def get_current_window_end(schedule, now=None):
 TIME_LINE = 10
 RUNTIME_LINE = 11
 QUERY_LINE = 12
-MONITOR_STATUS_LINE = 16
-SCHEDULE_LINE = 17
-ACTIVE_ROLLCALL_LINE = 22
-SIGN_STATUS_LINE = 23
-FOOTER_LINE = 26
+NEXT_CHECK_LINE = 13
+MONITOR_STATUS_LINE = 17
+SCHEDULE_LINE = 18
+ACTIVE_ROLLCALL_LINE = 23
+SIGN_STATUS_LINE = 24
+FOOTER_LINE = 27
 
 def update_status_line(line_num, label, value, color):
     """更新指定行的状态信息，不清屏"""
@@ -653,10 +656,29 @@ def start_monitor(account):
             return data
         return None
 
+    def get_next_check_text(now_dt, current_time, elapsed, monitoring_allowed):
+        if monitoring_allowed:
+            target_time = current_time + max(0, next_query_at - elapsed)
+            return datetime.fromtimestamp(target_time).strftime('%Y-%m-%d %H:%M:%S')
+
+        next_start = get_next_schedule_start(monitor_schedule, now_dt)
+        if next_start is None:
+            return "Waiting for next monitor window"
+        return next_start.strftime('%Y-%m-%d %H:%M:%S')
+
+    next_query_at = 0
+    initial_next_check_text = get_next_check_text(
+        initial_now_dt,
+        start_time,
+        0,
+        initial_monitoring_allowed,
+    )
+
     print_dashboard(
         ACCOUNT_NAME,
         start_time,
         query_count,
+        initial_next_check_text,
         0,
         show_banner=False,
         rollcall_state=rollcall_state,
@@ -665,7 +687,7 @@ def start_monitor(account):
 
     footer_initialized = False
     last_displayed_elapsed = -1
-    next_query_at = 0
+    last_next_check_text = initial_next_check_text
     last_monitoring_allowed = initial_monitoring_allowed
 
     try:
@@ -678,6 +700,7 @@ def start_monitor(account):
             try:
                 current_time = time.time()
                 now_dt = datetime.now()
+                monitoring_allowed = is_in_schedule_window(monitor_schedule, now_dt)
 
                 if not footer_initialized:
                     footer_initialized = True
@@ -689,11 +712,13 @@ def start_monitor(account):
 
                     local_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
                     running_time = format_time(elapsed)
+                    next_check_text = get_next_check_text(now_dt, current_time, elapsed, monitoring_allowed)
 
                     update_status_line(TIME_LINE, "Current Time:", local_time, Colors.OKCYAN)
                     update_status_line(RUNTIME_LINE, "Running Time:", running_time, Colors.OKGREEN)
-
-                monitoring_allowed = is_in_schedule_window(monitor_schedule, now_dt)
+                    if next_check_text != last_next_check_text:
+                        last_next_check_text = next_check_text
+                        update_status_line(NEXT_CHECK_LINE, "Next Check:", next_check_text, Colors.OKCYAN)
 
                 if monitor_schedule.get("enabled"):
                     if monitoring_allowed:
@@ -716,6 +741,10 @@ def start_monitor(account):
                                 "pending",
                             )
                             next_query_at = elapsed
+                            next_check_text = get_next_check_text(now_dt, current_time, elapsed, True)
+                            if next_check_text != last_next_check_text:
+                                last_next_check_text = next_check_text
+                                update_status_line(NEXT_CHECK_LINE, "Next Check:", next_check_text, Colors.OKCYAN)
                     else:
                         next_start = get_next_schedule_start(monitor_schedule, now_dt)
                         schedule_text = schedule_description
@@ -735,6 +764,10 @@ def start_monitor(account):
                                 "Waiting for next monitor window",
                                 "pending",
                             )
+                        next_check_text = get_next_check_text(now_dt, current_time, elapsed, False)
+                        if next_check_text != last_next_check_text:
+                            last_next_check_text = next_check_text
+                            update_status_line(NEXT_CHECK_LINE, "Next Check:", next_check_text, Colors.OKCYAN)
                         last_monitoring_allowed = False
                         continue
                 else:
@@ -748,6 +781,10 @@ def start_monitor(account):
 
                 if elapsed >= next_query_at:
                     next_query_at = elapsed + interval
+                    next_check_text = get_next_check_text(now_dt, current_time, elapsed, True)
+                    if next_check_text != last_next_check_text:
+                        last_next_check_text = next_check_text
+                        update_status_line(NEXT_CHECK_LINE, "Next Check:", next_check_text, Colors.OKCYAN)
                     data = fetch_rollcalls_with_relogin()
                     if data is None:
                         continue
