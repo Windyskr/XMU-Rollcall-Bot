@@ -13,6 +13,7 @@ from .config import get_cookies_path, load_config, normalize_monitor_schedule
 
 base_url = "https://lnt.xmu.edu.cn"
 interval = 1
+sign_delay_seconds = 30
 
 def _load_monitor_interval():
     """从配置文件加载监控间隔"""
@@ -31,6 +32,16 @@ def _load_monitor_schedule():
         return normalize_monitor_schedule(config.get("monitor_schedule"))
     except Exception:
         return normalize_monitor_schedule(None)
+
+
+def _load_rollcall_sign_delay():
+    """从配置文件加载检测到签到后的延时。"""
+    try:
+        config = load_config()
+        val = config.get("rollcall_sign_delay", 30)
+        return max(0, int(val))
+    except Exception:
+        return 30
 
 headers = {
     "User-Agent": (
@@ -189,7 +200,10 @@ def print_dashboard(
         schedule_text = monitor_state.get("schedule_text", schedule_text)
     print(f"{Colors.BOLD}Status:{Colors.ENDC}          {monitor_color}{monitor_status}{Colors.ENDC}")
     print(f"{Colors.BOLD}Schedule:{Colors.ENDC}        {Colors.OKCYAN}{schedule_text}{Colors.ENDC}")
-    print(f"{Colors.GRAY}Checking every {interval} second(s) | Press Ctrl+C to exit{Colors.ENDC}\n")
+    print(
+        f"{Colors.GRAY}Checking every {interval} second(s) | "
+        f"Sign delay {sign_delay_seconds} second(s) | Press Ctrl+C to exit{Colors.ENDC}\n"
+    )
     print(f"{Colors.BOLD}ACTIVE ROLLCALL{Colors.ENDC}")
     print_separator()
     active_rollcall = "None"
@@ -411,8 +425,9 @@ def update_monitor_status_lines(monitor_state):
 
 def start_monitor(account):
     """启动监控程序"""
-    global interval
+    global interval, sign_delay_seconds
     interval = _load_monitor_interval()
+    sign_delay_seconds = _load_rollcall_sign_delay()
     monitor_schedule = _load_monitor_schedule()
     schedule_description = describe_schedule(monitor_schedule)
 
@@ -470,6 +485,7 @@ def start_monitor(account):
 
     print(f"\n{Colors.OKGREEN}{Colors.BOLD}Initialization complete{Colors.ENDC}")
     print(f"{Colors.GRAY}Monitor schedule: {schedule_description}{Colors.ENDC}")
+    print(f"{Colors.GRAY}Sign delay after detection: {sign_delay_seconds} second(s){Colors.ENDC}")
     print(f"\n{Colors.GRAY}Starting monitor in 3 seconds...{Colors.ENDC}")
     time.sleep(3)
 
@@ -794,9 +810,17 @@ def start_monitor(account):
 
                     if temp_data != data:
                         if len(data.get('rollcalls', [])) > 0:
+                            if sign_delay_seconds > 0:
+                                update_rollcall_state(
+                                    None,
+                                    f"Rollcall detected, waiting {sign_delay_seconds} second(s) before signing",
+                                    "pending",
+                                )
+                                time.sleep(sign_delay_seconds)
                             if not verify_session(session):
                                 if not relogin_session("session check failed before answering rollcall"):
                                     continue
+                            update_rollcall_state(None, "Preparing to handle detected rollcall", "working")
                             print(f"\n{Colors.WARNING}{Colors.BOLD}New rollcall detected.{Colors.ENDC}")
                             temp_data = process_rollcalls(data, session, status_callback=update_rollcall_state)
                             update_rollcall_status_lines(rollcall_state)

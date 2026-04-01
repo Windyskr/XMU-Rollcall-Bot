@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
     "ngrok_token": "",
     "bark_url": "",
     "monitor_interval": 1,
+    "rollcall_sign_delay": 30,
     "monitor_schedule": deepcopy(DEFAULT_MONITOR_SCHEDULE),
 }
 
