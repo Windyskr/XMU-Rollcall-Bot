@@ -329,9 +329,9 @@ RUNTIME_LINE = 11
 QUERY_LINE = 12
 MONITOR_STATUS_LINE = 16
 SCHEDULE_LINE = 17
-ACTIVE_ROLLCALL_LINE = 19
-SIGN_STATUS_LINE = 20
-FOOTER_LINE = 23
+ACTIVE_ROLLCALL_LINE = 22
+SIGN_STATUS_LINE = 23
+FOOTER_LINE = 26
 
 def update_status_line(line_num, label, value, color):
     """更新指定行的状态信息，不清屏"""
@@ -483,6 +483,38 @@ def start_monitor(account):
         "status_color": Colors.OKGREEN,
         "schedule_text": schedule_description,
     }
+    initial_now_dt = datetime.now()
+    initial_monitoring_allowed = is_in_schedule_window(monitor_schedule, initial_now_dt)
+
+    if monitor_schedule.get("enabled"):
+        if initial_monitoring_allowed:
+            initial_window_end = get_current_window_end(monitor_schedule, initial_now_dt)
+            initial_schedule_text = schedule_description
+            if initial_window_end is not None:
+                initial_schedule_text = (
+                    f"{schedule_description} | Ends at "
+                    f"{initial_window_end.strftime('%Y-%m-%d %H:%M')}"
+                )
+            monitor_state["status_text"] = "Active - Monitoring for new rollcalls..."
+            monitor_state["status_color"] = Colors.OKGREEN
+            monitor_state["schedule_text"] = initial_schedule_text
+            rollcall_state["sign_status"] = "Monitoring for new rollcalls"
+            rollcall_state["status_color"] = get_rollcall_status_color("pending")
+        else:
+            initial_next_start = get_next_schedule_start(monitor_schedule, initial_now_dt)
+            initial_schedule_text = schedule_description
+            if initial_next_start is not None:
+                initial_schedule_text = (
+                    f"{schedule_description} | Next start "
+                    f"{initial_next_start.strftime('%Y-%m-%d %H:%M')}"
+                )
+            monitor_state["status_text"] = "Paused - Waiting for scheduled start"
+            monitor_state["status_color"] = Colors.WARNING
+            monitor_state["schedule_text"] = initial_schedule_text
+            rollcall_state["sign_status"] = "Waiting for next monitor window"
+            rollcall_state["status_color"] = get_rollcall_status_color("pending")
+    else:
+        initial_monitoring_allowed = True
 
     def update_rollcall_state(active_rollcall, sign_status, status_type="info"):
         if active_rollcall is None:
@@ -518,7 +550,7 @@ def start_monitor(account):
     footer_initialized = False
     last_displayed_elapsed = -1
     next_query_at = 0
-    last_monitoring_allowed = None
+    last_monitoring_allowed = initial_monitoring_allowed
 
     try:
         while True:
