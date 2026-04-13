@@ -266,6 +266,52 @@ def describe_schedule(schedule):
     return f"{days_text} {schedule.get('start_time')} - {schedule.get('end_time')}"
 
 
+def _format_schedule_notification_time(value):
+    return value.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def notify_schedule_window_event(
+    event_name,
+    account_id,
+    account_name,
+    username,
+    schedule_description,
+    event_time=None,
+    window_end=None,
+    next_start=None,
+):
+    """为定时监控窗口的开始/结束发送 Bark 通知。"""
+    event_time = event_time or datetime.now()
+    account_label = account_name or username
+    lines = [
+        f"Account: {account_label}",
+        f"Schedule: {schedule_description}",
+    ]
+
+    if event_name == "started":
+        title = "Scheduled monitoring started"
+        lines.append(f"Started at: {_format_schedule_notification_time(event_time)}")
+        if window_end is not None:
+            lines.append(f"Ends at: {_format_schedule_notification_time(window_end)}")
+        lines.append("Status: Monitoring is now active.")
+    elif event_name == "ended":
+        title = "Scheduled monitoring ended"
+        lines.append(f"Ended at: {_format_schedule_notification_time(event_time)}")
+        if next_start is not None:
+            lines.append(f"Next start: {_format_schedule_notification_time(next_start)}")
+        lines.append("Status: Monitoring is paused until the next window.")
+    else:
+        raise ValueError(f"Unsupported schedule event: {event_name}")
+
+    dedupe_key = (
+        "monitor_schedule",
+        account_id,
+        event_name,
+        event_time.strftime("%Y-%m-%d %H:%M"),
+    )
+    return send_bark_message(title, "\n".join(lines), dedupe_key=dedupe_key)
+
+
 def is_in_schedule_window(schedule, now=None):
     """判断当前时间是否处于允许监控的时段。"""
     schedule = normalize_monitor_schedule(schedule)
@@ -751,6 +797,15 @@ def start_monitor(account):
                             schedule_text,
                         )
                         if last_monitoring_allowed is not True:
+                            notify_schedule_window_event(
+                                "started",
+                                ACCOUNT_ID,
+                                ACCOUNT_NAME,
+                                USERNAME,
+                                schedule_description,
+                                event_time=now_dt,
+                                window_end=window_end,
+                            )
                             update_rollcall_state(
                                 None,
                                 "Monitoring for new rollcalls",
@@ -775,6 +830,15 @@ def start_monitor(account):
                             schedule_text,
                         )
                         if last_monitoring_allowed is not False:
+                            notify_schedule_window_event(
+                                "ended",
+                                ACCOUNT_ID,
+                                ACCOUNT_NAME,
+                                USERNAME,
+                                schedule_description,
+                                event_time=now_dt,
+                                next_start=next_start,
+                            )
                             update_rollcall_state(
                                 None,
                                 "Waiting for next monitor window",
