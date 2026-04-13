@@ -8,6 +8,7 @@ from .config import (
     get_account_by_id, CONFIG_FILE, delete_account, perform_account_deletion
 )
 from .monitor import start_monitor, base_url, headers
+from .notification import send_bark_message
 from . import __version__
 
 # ANSI Color codes
@@ -46,6 +47,19 @@ def _parse_version(v):
         return tuple(int(x) for x in v.split("."))
     except (ValueError, AttributeError):
         return (0,)
+
+
+def save_bark_url_and_send_test(config, bark_url):
+    bark_url = bark_url.strip()
+    config["bark_url"] = bark_url
+    save_config(config)
+    if not bark_url:
+        return None
+    return send_bark_message(
+        "XMU Rollcall Bot Test",
+        "If you received this message, Bark notifications are working.",
+        bark_url=bark_url,
+    )
 
 @click.group(invoke_without_command=True)
 @click.pass_context
@@ -230,10 +244,17 @@ def config():
                 default=current_config.get("bark_url", ""),
                 show_default=False
             ).strip()
-            current_config["bark_url"] = bark_url
-            save_config(current_config)
+            test_result = save_bark_url_and_send_test(current_config, bark_url)
             if bark_url:
-                click.echo(f"{Colors.OKGREEN}Bark URL saved.{Colors.ENDC}\n")
+                click.echo(f"{Colors.OKGREEN}Bark URL saved.{Colors.ENDC}")
+                click.echo(f"{Colors.OKCYAN}Sending test notification...{Colors.ENDC}")
+                if test_result:
+                    click.echo(f"{Colors.OKGREEN}✓ Test notification sent. Check your Bark device.{Colors.ENDC}\n")
+                else:
+                    click.echo(
+                        f"{Colors.WARNING}⚠ Test notification failed. "
+                        f"Please check the Bark URL and device status.{Colors.ENDC}\n"
+                    )
             else:
                 click.echo(f"{Colors.OKGREEN}Bark notifications disabled.{Colors.ENDC}\n")
         elif action.lower() == 'i':
